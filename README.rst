@@ -2,7 +2,7 @@
 mtools
 ======
 
-|PyPI version| |Python 37| |Python 38| |Python 39|
+|PyPI version| |PyPI pyversions| |PyPI license|
 
 **mtools** is a collection of helper scripts to parse, filter, and visualize
 MongoDB log files (``mongod``, ``mongos``). mtools also includes ``mlaunch``, a
@@ -17,55 +17,57 @@ What's in the box?
 
 The following tools are in the mtools collection:
 
-`mlogfilter <http://rueckstiess.github.io/mtools/mlogfilter.html>`__
+`mlogfilter <https://rueckstiess.github.io/mtools/mlogfilter.html>`__
    slices log files by time, merges log files, filters slow queries, finds
    table scans, shortens log lines, filters by other attributes, convert to
    JSON
 
-`mloginfo <http://rueckstiess.github.io/mtools/mloginfo.html>`__
+`mloginfo <https://rueckstiess.github.io/mtools/mloginfo.html>`__
    returns info about log file, like start and end time, version, binary,
    special sections like restarts, connections, distinct view
+   (requires ``numpy``)
 
-`mplotqueries <http://rueckstiess.github.io/mtools/mplotqueries.html>`__
+`mplotqueries <https://rueckstiess.github.io/mtools/mplotqueries.html>`__
    visualize log files with different types of plots (requires ``matplotlib``)
 
-`mlaunch <http://rueckstiess.github.io/mtools/mlaunch.html>`__
+`mlaunch <https://rueckstiess.github.io/mtools/mlaunch.html>`__
    a script to quickly spin up local test environments, including replica sets
-   and sharded systems (requires ``pymongo``)
+   and sharded systems (requires ``pymongo``, ``psutil``, ``packaging``)
 
-`mtransfer <http://rueckstiess.github.io/mtools/mtransfer.html>`__
+`mtransfer <https://rueckstiess.github.io/mtools/mtransfer.html>`__
    an experimental script to transfer databases between MongoDB instances by
    copying WiredTiger data files (requires ``pymongo`` and ``wiredtiger``)
 
 For more information, see the `mtools documentation
-<http://rueckstiess.github.io/mtools>`__.
+<https://rueckstiess.github.io/mtools>`__.
 
 Requirements and Installation Instructions
 ------------------------------------------
 
 The mtools collection is written in Python, and most of the tools only use the
 standard packages shipped with Python. The tools are currently tested with
-Python 3.7, 3.8, and 3.9.
+Python 3.8, 3.9, 3.10, and 3.11.
 
 Some of the tools have additional dependencies, which are listed under the
 specific tool's section. See the `installation instructions
-<http://rueckstiess.github.io/mtools/install.html>`__ for more information.
+<https://rueckstiess.github.io/mtools/install.html>`__ for more information.
 
-The mtools suite is only tested with actively supported (non End-of-Life)
-versions of the MongoDB server. As of December 2021, that includes
-MongoDB 4.0 or newer.
+The mtools suite is only tested with
+`actively supported <https://www.mongodb.com/support-policy/lifecycles>`
+(non End-of-Life) versions of the MongoDB server. As of September 2023,
+that includes MongoDB 4.4 or newer.
 
 Recent Changes
 --------------
 
-See `Changes to mtools <http://rueckstiess.github.io/mtools/changelog.html>`__
+See `Changes to mtools <https://rueckstiess.github.io/mtools/changelog.html>`__
 for a list of changes from previous versions of mtools.
 
 Contribute to mtools
 --------------------
 
 If you'd like to contribute to mtools, please read the `contributor page
-<http://rueckstiess.github.io/mtools/contributing.html>`__ for instructions.
+<https://rueckstiess.github.io/mtools/contributing.html>`__ for instructions.
 
 Disclaimer
 ----------
@@ -78,9 +80,7 @@ posted in the `Issues
 
 .. |PyPI version| image:: https://img.shields.io/pypi/v/mtools.svg
    :target: https://pypi.python.org/pypi/mtools/
-.. |Python 37| image:: https://img.shields.io/badge/Python-3.7-brightgreen.svg?style=flat
-   :target: http://python.org
-.. |Python 38| image:: https://img.shields.io/badge/Python-3.8-brightgreen.svg?style=flat
-   :target: http://python.org
-.. |Python 39| image:: https://img.shields.io/badge/Python-3.9-brightgreen.svg?style=flat
-   :target: http://python.org
+.. |PyPI pyversions| image:: https://img.shields.io/pypi/pyversions/mtools.svg
+   :target: https://pypi.python.org/pypi/mtools/
+.. |PyPI license| image:: https://img.shields.io/pypi/l/mtools.svg
+   :target: https://pypi.python.org/pypi/mtools/

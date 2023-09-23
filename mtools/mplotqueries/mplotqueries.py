@@ -22,10 +22,9 @@ try:
     import re
 
 except ImportError as e:
-    raise ImportError("Can't import matplotlib. See "
-                      "https://matplotlib.org/users/installing.html "
-                      "for instructions on how to install matplotlib."
-                      "Error: " + str(e))
+    raise ImportError(f"Can't import matplotlib: {str(e)}\n\n"
+                       "For installation instructions, see:\n"
+                       "   https://matplotlib.org/stable/users/installing/index.html")
 
 
 def op_or_cmd(le):
@@ -86,9 +85,7 @@ class MPlotQueriesTool(LogFileTool):
                                           "Possible values depend on type of "
                                           "plot. All basic plot types can "
                                           "group on 'namespace','hostname' 'operation', "
-                                          "'thread', 'pattern', range and "
-                                          "histogram plots can additionally "
-                                          "group on 'log2code'. The group can "
+                                          "'thread', 'pattern'. The group can "
                                           "also be a regular expression."))
         self.argparser.add_argument('--group-limit', metavar='N', type=int,
                                     default=None,
@@ -128,10 +125,6 @@ class MPlotQueriesTool(LogFileTool):
                                     help='plot slow DNS resolution', default=False)
         self.argparser.add_argument('--oplog', action='store_true',
                                     help=('plot slow oplog application'))
-        self.argparser.add_argument('--storagestats',
-                                    action='store_true', default=False,
-                                    help=("plot storage statistics for insert "
-                                          "and update operations"))
 
         self.legend = None
 
@@ -225,10 +218,6 @@ class MPlotQueriesTool(LogFileTool):
                         (logevent.component != "REPL" or
                             not re.search("applied op:", logevent.line_str))):
                     continue
-
-                if (self.args['storagestats']):
-                    if (op_or_cmd(logevent) not in ['insert', 'update']):
-                        continue
 
                 # adjust times if --optime-start is enabled
                 if (self.args['optime_start'] and

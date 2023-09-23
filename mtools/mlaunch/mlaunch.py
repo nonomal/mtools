@@ -28,23 +28,18 @@ except ImportError:
     import queue as Queue
 
 try:
-    try:
-        from pymongo import MongoClient as Connection
-        from pymongo import version_tuple as pymongo_version
-        from bson import SON
-        from io import BytesIO
-        from distutils.version import LooseVersion
-    except ImportError:
-        from pymongo import Connection
-        from pymongo import version_tuple as pymongo_version
-        from bson import SON
+    from pymongo import MongoClient as Connection
+    from pymongo import version_tuple as pymongo_version
+    from bson import SON
+    from io import BytesIO
+    from packaging import version
 
     from pymongo.errors import ConnectionFailure, AutoReconnect
     from pymongo.errors import OperationFailure, ConfigurationError
 except ImportError as e:
-    raise ImportError("Can't import pymongo. See "
-                      "https://api.mongodb.com/python/current/ for "
-                      "instructions on how to install pymongo: " + str(e))
+    raise ImportError(f"Can't import pymongo: {str(e)}\n\n"
+                       "For instructions on how to install pymongo, see:\n"
+                       "   https://www.mongodb.com/docs/drivers/pymongo/#installation")
 
 
 class MongoConnection(Connection):
@@ -52,16 +47,11 @@ class MongoConnection(Connection):
     MongoConnection class.
 
     Wrapper around Connection (itself conditionally a MongoClient or
-    pymongo.Connection) to specify timeout if pymongo >= 3.0.
+    pymongo.Connection) to specify timeout and directConnection.
     """
 
     def __init__(self, *args, **kwargs):
-        if pymongo_version[0] >= 3:
-            if 'serverSelectionTimeoutMS' not in kwargs:
-                kwargs['serverSelectionTimeoutMS'] = 1
-        else:
-            if 'serverSelectionTimeoutMS' in kwargs:
-                kwargs.remove('serverSelectionTimeoutMS')
+        kwargs.setdefault('serverSelectionTimeoutMS', 1)
 
         # Set client application name for MongoDB 3.4+ servers
         kwargs['appName'] = f'''mlaunch v{__version__}'''
@@ -91,7 +81,7 @@ def wait_for_host(port, interval=1, timeout=30, to_start=True, queue=None,
             return False
         try:
             # make connection and ping host
-            con = MongoConnection(host,
+            con = MongoConnection(host, directConnection=True,
                                   **(ssl_pymongo_options or {}),
                                   **(tls_pymongo_options or {}))
             con.admin.command('ping')
@@ -119,19 +109,16 @@ def shutdown_host(port, username=None, password=None, authdb=None):
     """
     host = 'localhost:%i' % port
     try:
-        mc = MongoConnection(host)
+        if username and password and authdb:
+            if authdb != "admin":
+                raise RuntimeError("given username/password is not for "
+                                    "admin database")
+            mc = MongoConnection(host, username=username, password=password,
+                                 directConnection=True)
+        else:
+            mc = MongoConnection(host, directConnection=True)
+        
         try:
-            if username and password and authdb:
-                if authdb != "admin":
-                    raise RuntimeError("given username/password is not for "
-                                       "admin database")
-                else:
-                    try:
-                        mc.admin.authenticate(name=username, password=password)
-                    except OperationFailure:
-                        # perhaps auth is not required
-                        pass
-
             mc.admin.command('shutdown', force=True)
         except AutoReconnect:
             pass
@@ -146,7 +133,7 @@ def shutdown_host(port, username=None, password=None, authdb=None):
 
 
 @functools.lru_cache()
-def check_mongo_server_output(binary, argument):
+def check_mongo_server_output(binary, argument, fatal = True):
     """Call mongo[d|s] with arguments such as --help or --version.
 
     This is used only to check the server's output. We expect the server to
@@ -157,8 +144,11 @@ def check_mongo_server_output(binary, argument):
                                 stderr=subprocess.STDOUT,
                                 stdout=subprocess.PIPE, shell=False)
     except OSError as exc:
-        print('Failed to launch %s' % binary)
-        raise exc
+        if fatal:
+            print(f"Fatal error: failed to launch [{binary}].\n"
+                "Please ensure this binary is found in your $PATH "
+                "or specified with --binarypath.\n")
+            raise SystemExit(exc)
 
     out, err = proc.communicate()
     if proc.returncode:
@@ -206,8 +196,14 @@ class MLaunchTool(BaseCmdLineTool):
         # indicate if running in testing mode
         self.test = test
 
-        # version of MongoDB server
-        self.current_version = self.getMongoDVersion()
+        # find mongod version to determine avail options for arg parser in run()
+        # consider --binarypath if set
+        for i in range(1,len(sys.argv)):
+            if (sys.argv[i] == "--binarypath") and (i+1 < len(sys.argv)):
+                self.args = dict()
+                self.args['binarypath'] = sys.argv[i+1]
+                break
+        self.current_version = self.getMongoDVersion(False)
 
     def run(self, arguments=None):
         """
@@ -294,14 +290,15 @@ class MLaunchTool(BaseCmdLineTool):
                                        'several singles or replica sets. '
                                        'Provide either list of shard names or '
                                        'number of shards.'))
-        init_parser.add_argument('--config', action='store', default=-1,
+        init_parser.add_argument('--config', action='store', default=1,
                                  type=int, metavar='NUM',
                                  help=('adds NUM config servers to sharded '
-                                       'setup (requires --sharded, default=1, '
-                                       'with --csrs default=3)'))
-        init_parser.add_argument('--csrs', default=False, action='store_true',
-                                 help=('deploy config servers as a replica '
-                                       'set (requires MongoDB >= 3.2.0)'))
+                                       'setup (requires --sharded, default=1)'))
+
+        # As of MongoDB 3.6, all config servers must be CSRS
+        init_parser.add_argument('--csrs', default=True, action='store_true',
+                                 help=argparse.SUPPRESS)
+
         init_parser.add_argument('--mongos', action='store', default=1,
                                  type=int, metavar='NUM',
                                  help=('starts NUM mongos processes (requires '
@@ -372,7 +369,7 @@ class MLaunchTool(BaseCmdLineTool):
 
         # MongoDB 4.2 adds TLS options to replace the corresponding SSL options
         # https://docs.mongodb.com/manual/release-notes/4.2/#new-tls-options
-        if (LooseVersion(self.current_version) >= LooseVersion("4.2.0")):
+        if (version.parse(self.current_version) >= version.parse("4.2.0")):
             # tls
             tls_args = init_parser.add_argument_group('TLS options')
             tls_args.add_argument('--tlsCAFile',
@@ -417,11 +414,8 @@ class MLaunchTool(BaseCmdLineTool):
                                          help='activate FIPS 140-2 mode')
 
             tls_client_args = init_parser.add_argument_group('Client TLS options')
-            tls_client_args.add_argument('--tlsClientCertificate',
-                                         help='client certificate file for TLS',
-                                         type=is_file)
             tls_client_args.add_argument('--tlsClientCertificateKeyFile',
-                                         help='client certificate key file for TLS',
+                                         help='client certificate cert and key file for TLS',
                                          type=is_file)
             tls_client_args.add_argument('--tlsClientCertificateKeyFilePassword',
                                          help='client certificate key file password')
@@ -429,63 +423,64 @@ class MLaunchTool(BaseCmdLineTool):
             self.tls_args = tls_args
             self.tls_client_args = tls_client_args
             self.tls_server_args = tls_server_args
-        else:
-            # ssl
-            ssl_args = init_parser.add_argument_group('TLS/SSL options')
-            ssl_args.add_argument('--sslCAFile',
-                                  help='Certificate Authority file for TLS/SSL',
-                                  type=is_file)
-            ssl_args.add_argument('--sslCRLFile',
-                                  help='Certificate Revocation List file for TLS/SSL',
-                                  type=is_file)
-            ssl_args.add_argument('--sslAllowInvalidHostnames',
-                                  action='store_true',
-                                  help=('allow client and server certificates to '
-                                        'provide non-matching hostnames'))
-            ssl_args.add_argument('--sslAllowInvalidCertificates',
-                                  action='store_true',
-                                  help=('allow client or server connections with '
-                                        'invalid certificates'))
 
-            ssl_server_args = init_parser.add_argument_group('Server TLS/SSL options')
-            ssl_server_args.add_argument('--sslMode',
-                                         help='set the TLS/SSL operation mode',
-                                         choices=('disabled allowSSL preferSSL '
-                                                  'requireSSL'.split()))
-            ssl_server_args.add_argument('--sslPEMKeyFile',
-                                         help='PEM file for TLS/SSL', type=is_file)
-            ssl_server_args.add_argument('--sslPEMKeyPassword',
-                                         help='PEM file password')
-            ssl_server_args.add_argument('--sslClusterFile',
-                                         help=('key file for internal TLS/SSL '
-                                               'authentication'), type=is_file)
-            ssl_server_args.add_argument('--sslClusterPassword',
-                                         help=('internal authentication key '
-                                               'file password'))
-            ssl_server_args.add_argument('--sslDisabledProtocols',
-                                         help=('comma separated list of TLS '
-                                               'protocols to disable '
-                                               '[TLS1_0,TLS1_1,TLS1_2]'))
-            ssl_server_args.add_argument('--sslAllowConnectionsWithoutCertificates',
-                                         action='store_true',
-                                         help=('allow client to connect without '
-                                               'presenting a certificate'))
-            ssl_server_args.add_argument('--sslFIPSMode', action='store_true',
-                                         help='activate FIPS 140-2 mode')
+        # ssl options were aliased to tls, but are still available in
+        # server versions through MongoDB 6.0
+        ssl_args = init_parser.add_argument_group('TLS/SSL options')
+        ssl_args.add_argument('--sslCAFile',
+                                help='Certificate Authority file for TLS/SSL',
+                                type=is_file)
+        ssl_args.add_argument('--sslCRLFile',
+                                help='Certificate Revocation List file for TLS/SSL',
+                                type=is_file)
+        ssl_args.add_argument('--sslAllowInvalidHostnames',
+                                action='store_true',
+                                help=('allow client and server certificates to '
+                                    'provide non-matching hostnames'))
+        ssl_args.add_argument('--sslAllowInvalidCertificates',
+                                action='store_true',
+                                help=('allow client or server connections with '
+                                    'invalid certificates'))
 
-            ssl_client_args = init_parser.add_argument_group('Client TLS/SSL options')
-            ssl_client_args.add_argument('--sslClientCertificate',
-                                         help='client certificate file for TLS/SSL',
-                                         type=is_file)
-            ssl_client_args.add_argument('--sslClientPEMKeyFile',
-                                         help='client PEM file for TLS/SSL',
-                                         type=is_file)
-            ssl_client_args.add_argument('--sslClientPEMKeyPassword',
-                                         help='client PEM file password')
+        ssl_server_args = init_parser.add_argument_group('Server TLS/SSL options')
+        ssl_server_args.add_argument('--sslMode',
+                                        help='set the TLS/SSL operation mode',
+                                        choices=('disabled allowSSL preferSSL '
+                                                'requireSSL'.split()))
+        ssl_server_args.add_argument('--sslPEMKeyFile',
+                                        help='PEM file for TLS/SSL', type=is_file)
+        ssl_server_args.add_argument('--sslPEMKeyPassword',
+                                        help='PEM file password')
+        ssl_server_args.add_argument('--sslClusterFile',
+                                        help=('key file for internal TLS/SSL '
+                                            'authentication'), type=is_file)
+        ssl_server_args.add_argument('--sslClusterPassword',
+                                        help=('internal authentication key '
+                                            'file password'))
+        ssl_server_args.add_argument('--sslDisabledProtocols',
+                                        help=('comma separated list of TLS '
+                                            'protocols to disable '
+                                            '[TLS1_0,TLS1_1,TLS1_2]'))
+        ssl_server_args.add_argument('--sslAllowConnectionsWithoutCertificates',
+                                        action='store_true',
+                                        help=('allow client to connect without '
+                                            'presenting a certificate'))
+        ssl_server_args.add_argument('--sslFIPSMode', action='store_true',
+                                        help='activate FIPS 140-2 mode')
 
-            self.ssl_args = ssl_args
-            self.ssl_client_args = ssl_client_args
-            self.ssl_server_args = ssl_server_args
+        ssl_client_args = init_parser.add_argument_group('Client TLS/SSL options')
+        ssl_client_args.add_argument('--sslClientCertificate',
+                                        help='client certificate file for TLS/SSL',
+                                        type=is_file)
+        ssl_client_args.add_argument('--sslClientPEMKeyFile',
+                                        help='client PEM file for TLS/SSL',
+                                        type=is_file)
+        ssl_client_args.add_argument('--sslClientPEMKeyPassword',
+                                        help='client PEM file password')
+
+        self.ssl_args = ssl_args
+        self.ssl_client_args = ssl_client_args
+        self.ssl_server_args = ssl_server_args
 
         # start command
         start_parser = subparsers.add_parser('start',
@@ -661,26 +656,16 @@ class MLaunchTool(BaseCmdLineTool):
 
         if (self._get_tls_server_args() and not
                 self.args['tlsAllowConnectionsWithoutCertificates'] and not
-                self.args['tlsClientCertificate'] and not
                 self.args['tlsClientCertificateKeyFile']):
             sys.stderr.write('warning: server requires certificates but no'
-                             ' --tlsClientCertificate provided\n')
+                             ' --tlsClientCertificateKeyFile provided\n')
         # number of default config servers
         if self.args['config'] == -1:
             self.args['config'] = 1
 
-        # Exit with error if --csrs is set and MongoDB < 3.1.0
-        if (self.args['csrs'] and
-                LooseVersion(self.current_version) < LooseVersion("3.1.0") and
-                LooseVersion(self.current_version) != LooseVersion("0.0.0")):
-            errmsg = (" \n * The '--csrs' option requires MongoDB version "
-                      "3.2.0 or greater, the current version is %s.\n"
-                      % self.current_version)
-            raise SystemExit(errmsg)
-
         # add the 'csrs' parameter as default for MongoDB >= 3.3.0
-        if (LooseVersion(self.current_version) >= LooseVersion("3.3.0") or
-                LooseVersion(self.current_version) == LooseVersion("0.0.0")):
+        if (version.parse(self.current_version) >= version.parse("3.3.0") or
+                version.parse(self.current_version) == version.parse("0.0.0")):
             self.args['csrs'] = True
 
         # construct startup strings
@@ -693,7 +678,7 @@ class MLaunchTool(BaseCmdLineTool):
 
         # exit if running in testing mode
         if self.test:
-            sys.exit(0)
+            return
 
         # check if authentication is enabled, make key file
         if self.args['auth'] and first_init:
@@ -769,7 +754,7 @@ class MLaunchTool(BaseCmdLineTool):
                 con = self.client('localhost:%i' % mongos[0])
 
                 shards_to_add = len(self.shard_connection_str)
-                nshards = con['config']['shards'].count()
+                nshards = con['config']['shards'].count_documents({})
                 if nshards < shards_to_add:
                     if self.args['replicaset']:
                         print("adding shards. can take up to 30 seconds...")
@@ -780,7 +765,7 @@ class MLaunchTool(BaseCmdLineTool):
                                                  shard_names))
                 while True:
                     try:
-                        nshards = con['config']['shards'].count()
+                        nshards = con['config']['shards'].count_documents({})
                     except Exception:
                         nshards = 0
                     if nshards >= shards_to_add:
@@ -793,7 +778,7 @@ class MLaunchTool(BaseCmdLineTool):
                                                        ('name', name)]))
                         except Exception as e:
                             if self.args['verbose']:
-                                print('%s will retry in a moment.' % e)
+                                print('Shard addition failed: %s; will retry in a moment.' % e)
                             continue
 
                         if res['ok']:
@@ -803,7 +788,7 @@ class MLaunchTool(BaseCmdLineTool):
                                 break
                         else:
                             if self.args['verbose']:
-                                print(res + ' - will retry')
+                                print('Shard addition failed: ' + res + ' - will retry')
 
                     time.sleep(1)
 
@@ -915,12 +900,16 @@ class MLaunchTool(BaseCmdLineTool):
     # but with release candidates we get abck something like
     # "db version v3.4.0-rc2". This code exact the "major.minor.revision"
     # part of the string
-    def getMongoDVersion(self):
+    def getMongoDVersion(self, fatal = True):
         binary = "mongod"
         if self.args and self.args.get('binarypath'):
             binary = os.path.join(self.args['binarypath'], binary)
 
-        out = check_mongo_server_output(binary, '--version')
+        try:
+            out = check_mongo_server_output(binary, '--version', fatal)
+        except Exception:
+            return "0.0.0"
+
         buf = BytesIO(out)
         current_version = buf.readline().strip().decode('utf-8')
         # remove prefix "db version v"
@@ -935,8 +924,7 @@ class MLaunchTool(BaseCmdLineTool):
         except Exception:
             pass
 
-        if self.args and self.args['verbose']:
-            print("Detected mongod version: %s" % current_version)
+        print("Detected mongod version: %s" % current_version)
         return current_version
 
     def client(self, host_and_port, **kwargs):
@@ -1359,20 +1347,11 @@ class MLaunchTool(BaseCmdLineTool):
         # add config server to cluster tree
         self.cluster_tree.setdefault('config', []).append(port)
 
-        # If not CSRS, set the number of config servers to be 1 or 3
-        # This is needed, otherwise `mlaunch init --sharded 2 --replicaset
-        # --config 2` on <3.3.0 will crash
-        if not self.args.get('csrs') and self.args['command'] == 'init':
-            if num_config >= 3:
-                num_config = 3
-            else:
-                num_config = 1
-
         for i in range(num_config):
             port = i + current_port
 
             try:
-                mc = self.client('localhost:%i' % port)
+                mc = self.client('localhost:%i' % port, directConnection=True)
                 mc.admin.command('ping')
                 running = True
 
@@ -1391,7 +1370,7 @@ class MLaunchTool(BaseCmdLineTool):
     def is_running(self, port):
         """Return True if a host on a specific port is running."""
         try:
-            con = self.client('localhost:%s' % port)
+            con = self.client('localhost:%s' % port, directConnection=True)
             con.admin.command('ping')
             return True
         except (AutoReconnect, ConnectionFailure, OperationFailure):
@@ -1590,7 +1569,13 @@ class MLaunchTool(BaseCmdLineTool):
         # get the help list of the binary
         if self.args and self.args['binarypath']:
             binary = os.path.join(self.args['binarypath'], binary)
-        out = check_mongo_server_output(binary, '--help')
+
+        try:
+            out = check_mongo_server_output(binary, '--help')
+        except Exception as exc:
+            raise SystemExit("Fatal error trying get output from `%s`: %s. "
+                "Is the binary in your path?" % (exc, binary))
+
         accepted_arguments = []
         # extract all arguments starting with a '-'
         for line in [option for option in out.decode('utf-8').split('\n')]:
@@ -1613,6 +1598,8 @@ class MLaunchTool(BaseCmdLineTool):
                 argname = arg.split('=', 1)[0]
                 if (binary.endswith('mongod') and config and
                         argname in self.UNSUPPORTED_CONFIG_ARGS):
+                    if self.args['verbose']:
+                        print(f"Unsupported config arg: {argname}")
                     continue
                 elif argname in accepted_arguments or re.match(r'-v+', arg):
                     result.append(arg)
@@ -1657,34 +1644,34 @@ class MLaunchTool(BaseCmdLineTool):
         if not self.ssl_server_args:
             return opts
 
+        # Map SSL parameters to TLS equivalents for PyMongo 4.0+
+        # https://pymongo.readthedocs.io/en/stable/migrate-to-pymongo4.html#renamed-uri-options
         for parser in [self.ssl_server_args]:
             for action in parser._group_actions:
                 name = action.dest
                 value = args.get(name)
                 if value:
-                    opts['ssl'] = True
-                    opts['ssl_cert_reqs'] = ssl.CERT_NONE
+                    opts['tls'] = True
+                    opts['tlsAllowInvalidCertificates'] = True
         for parser in self.ssl_args, self.ssl_client_args:
             for action in parser._group_actions:
                 name = action.dest
                 value = args.get(name)
                 if value:
-                    opts['ssl'] = True
+                    opts['tls'] = True
 
                     if name == 'sslClientCertificate':
-                        opts['ssl_certfile'] = value
-                    elif name == 'sslClientPEMKeyFile':
-                        opts['ssl_keyfile'] = value
+                        opts['tlsCertificateKeyFile'] = value
                     elif name == 'sslClientPEMKeyPassword':
-                        opts['ssl_pem_passphrase'] = value
+                        opts['tlsCertificateKeyFilePassword'] = value
                     elif name == 'sslAllowInvalidCertificates':
-                        opts['ssl_cert_reqs'] = ssl.CERT_OPTIONAL
+                        opts['tlsAllowInvalidCertificates'] = True
                     elif name == 'sslAllowInvalidHostnames':
-                        opts['ssl_match_hostname'] = False
+                        opts['tlsAllowInvalidHostnames'] = True
                     elif name == 'sslCAFile':
-                        opts['ssl_ca_certs'] = value
+                        opts['tlsCAFile'] = value
                     elif name == 'sslCRLFile':
-                        opts['ssl_crlfile'] = value
+                        opts['tlsCRLFile'] = value
 
         return opts
 
@@ -1716,7 +1703,6 @@ class MLaunchTool(BaseCmdLineTool):
                 value = args.get(name)
                 if value:
                     opts['tls'] = True
-                    opts['tls_cert_reqs'] = ssl.CERT_NONE
         for parser in self.tls_args, self.tls_client_args:
             for action in parser._group_actions:
                 name = action.dest
@@ -1726,14 +1712,14 @@ class MLaunchTool(BaseCmdLineTool):
 
                     # TLS parameters require PyMongo 3.9.0+
                     # https://api.mongodb.com/python/3.9.0/changelog.html
-                    if name == 'tlsCertificateKeyFile':
+                    if name == 'tlsClientCertificateKeyFile':
                         opts['tlsCertificateKeyFile'] = value
-                    elif name == 'tlsCertificateKeyFilePassword':
+                    elif name == 'tlsClientCertificateKeyFilePassword':
                         opts['tlsCertificateKeyFilePassword'] = value
                     elif name == 'tlsAllowInvalidCertificates':
-                        opts['tlsAllowInvalidCertificates'] = ssl.CERT_OPTIONAL
+                        opts['tlsAllowInvalidCertificates'] = True
                     elif name == 'tlsAllowInvalidHostnames':
-                        opts['tlsAllowInvalidHostnames'] = False
+                        opts['tlsAllowInvalidHostnames'] = True
                     elif name == 'tlsCAFile':
                         opts['tlsCAFile'] = value
                     elif name == 'tlsCRLFile':
@@ -1765,11 +1751,15 @@ class MLaunchTool(BaseCmdLineTool):
             shard_names = [None]
         return shard_names
 
+    def _get_log_path(self, command_str):
+        match = re.search(r'--logpath ([^\s]+)', command_str)
+        return match.group(1)
+
     def _get_last_error_log(self, command_str):
-        logpath = re.search(r'--logpath ([^\s]+)', command_str)
+        log_path = self._get_log_path(command_str)
         loglines = ''
         try:
-            with open(logpath.group(1), 'rb') as logfile:
+            with open(log_path, 'rb') as logfile:
                 for line in logfile:
                     if not line.startswith('----- BEGIN BACKTRACE -----'):
                         loglines += line
@@ -1814,9 +1804,10 @@ class MLaunchTool(BaseCmdLineTool):
             except subprocess.CalledProcessError as e:
                 print(e.output)
                 print(self._get_last_error_log(command_str), file=sys.stderr)
+                log_path = self._get_log_path(command_str)
                 raise SystemExit("can't start process, return code %i. "
-                                 "tried to launch: %s"
-                                 % (e.returncode, command_str))
+                                 "tried to launch: %s\nlog: %s"
+                                 % (e.returncode, command_str, log_path))
 
         if wait:
             self.wait_for(ports)
@@ -1828,58 +1819,43 @@ class MLaunchTool(BaseCmdLineTool):
                 print('Skipping replica set initialization for %s' % name)
             return
 
-        con = self.client('localhost:%i' % port)
+        con = self.client('localhost:%i' % port, directConnection=True)
         try:
             rs_status = con['admin'].command({'replSetGetStatus': 1})
             return rs_status
         except OperationFailure:
             # not initiated yet
+            
+            if self.args['verbose']:
+                print("initializing replica set '%s' with configuration: %s"
+                      % (name, self.config_docs[name]))
+            
+            initiated = False
             for i in range(maxwait):
                 try:
                     con['admin'].command({'replSetInitiate':
                                           self.config_docs[name]})
+                    initiated = True
                     break
                 except OperationFailure as e:
-                    print(e.message + " - will retry")
+                    print('Replica set initialization failed: %s - will retry' % e)
                     time.sleep(1)
 
-            if self.args['verbose']:
-                print("initializing replica set '%s' with configuration: %s"
-                      % (name, self.config_docs[name]))
-            print("replica set '%s' initialized." % name)
+            if initiated:
+                print(f"replica set '{name}' initialized.")
+            else:
+                raise SystemExit(f"replica set '{name}' failed to initialize.")
 
     def _add_user(self, port, name, password, database, roles):
         con = self.client('localhost:%i' % port, serverSelectionTimeoutMS=10000)
-        ismaster = con['admin'].command('isMaster')
-        set_name = ismaster.get('setName')
-        if set_name:
-            con.close()
-            con = self.client('localhost:%i' % port, replicaSet=set_name,
-                              serverSelectionTimeoutMS=10000)
-        v = ismaster.get('maxWireVersion', 0)
-        if v >= 7:
-            # Until drivers have implemented SCRAM-SHA-256, use old mechanism.
-            opts = {'mechanisms': ['SCRAM-SHA-1']}
-        else:
-            opts = {}
 
         if database == "$external":
             password = None
 
         try:
-            con[database].add_user(name, password=password, roles=roles,
-                                   **opts)
+            con[database].command("createUser", name, pwd=password, roles=roles)
         except OperationFailure as e:
             raise e
-        except TypeError as e:
-            if pymongo_version < (2, 5, 0):
-                con[database].add_user(name, password=password, **opts)
-                warnings.warn("Your pymongo version is too old to support "
-                              "auth roles. Added a legacy user with root "
-                              "access. To support roles, you need to upgrade "
-                              "to pymongo >= 2.5.0")
-            else:
-                raise e
 
     def _get_processes(self):
         all_ports = self.get_tagged(['running'])
@@ -1989,19 +1965,11 @@ class MLaunchTool(BaseCmdLineTool):
         # create shards as stand-alones or replica sets
         nextport = self.args['port'] + num_mongos
         for shard in shard_names:
-            if (self.args['single'] and
-                    LooseVersion(self.current_version) >= LooseVersion("3.6.0")):
+            if self.args['single']:
                 errmsg = " \n * In MongoDB 3.6 and above a Shard must be " \
                          "made up of a replica set. Please use --replicaset " \
                          "option when starting a sharded cluster.*"
                 raise SystemExit(errmsg)
-
-            elif (self.args['single'] and
-                    LooseVersion(self.current_version) < LooseVersion("3.6.0")):
-                self.shard_connection_str.append(
-                    self._construct_single(
-                        self.dir, nextport, name=shard, extra='--shardsvr'))
-                nextport += 1
             elif self.args['replicaset']:
                 self.shard_connection_str.append(
                     self._construct_replset(
@@ -2015,22 +1983,9 @@ class MLaunchTool(BaseCmdLineTool):
         # start up config server(s)
         config_string = []
 
-        # SCCC config servers (MongoDB <3.3.0)
-        if not self.args['csrs'] and self.args['config'] >= 3:
-            config_names = ['config1', 'config2', 'config3']
-        else:
-            config_names = ['config']
-
         # CSRS config servers (MongoDB >=3.1.0)
-        if self.args['csrs']:
-            config_string.append(self._construct_config(self.dir, nextport,
+        config_string.append(self._construct_config(self.dir, nextport,
                                                         "configRepl", True))
-        else:
-            for name in config_names:
-                self._construct_config(self.dir, nextport, name)
-                config_string.append('%s:%i' % (self.args['hostname'],
-                                                nextport))
-                nextport += 1
 
         # multiple mongos use <datadir>/mongos/ as subdir for log files
         if num_mongos > 1:
@@ -2140,7 +2095,7 @@ class MLaunchTool(BaseCmdLineTool):
 
         auth_param = ''
         if self.args['auth']:
-            auth_param = '--auth'
+            auth_param = ''
             if '--keyFile' not in self.unknown_args:
                 key_path = os.path.abspath(os.path.join(self.dir, 'keyfile'))
                 auth_param = f'{auth_param} --keyFile "{key_path}"'
@@ -2158,7 +2113,7 @@ class MLaunchTool(BaseCmdLineTool):
 
         # Exit with error if hostname is specified but not bind_ip options
         if (self.args['hostname'] != 'localhost'
-                and LooseVersion(self.current_version) >= LooseVersion("3.6.0")
+                and version.parse(self.current_version) >= version.parse("3.6.0")
                 and (self.args['sharded'] or self.args['replicaset'])
                 and '--bind_ip' not in extra):
             os.removedirs(dbpath)
@@ -2169,6 +2124,7 @@ class MLaunchTool(BaseCmdLineTool):
             raise SystemExit(errmsg)
 
         extra += self._get_ssl_server_args()
+        extra += self._get_tls_server_args()
 
         path = self.args['binarypath'] or ''
         if os.name == 'nt':
@@ -2195,7 +2151,7 @@ class MLaunchTool(BaseCmdLineTool):
 
         auth_param = ''
         if self.args['auth']:
-            auth_param = '--auth'
+            auth_param = ''
             if '--keyFile' not in self.unknown_args:
                 key_path = os.path.abspath(os.path.join(self.dir, 'keyfile'))
                 auth_param = f'{auth_param} --keyFile "{key_path}"'
@@ -2205,6 +2161,7 @@ class MLaunchTool(BaseCmdLineTool):
                                                  "mongos") + extra
 
         extra += ' ' + self._get_ssl_server_args()
+        extra += ' ' + self._get_tls_server_args()
 
         path = self.args['binarypath'] or ''
         if os.name == 'nt':

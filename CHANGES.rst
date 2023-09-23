@@ -2,6 +2,58 @@
 Changes to mtools
 =================
 
+version 1.7.2
+~~~~~~~~~~~~~
+ * mlaunch: mlaunch init --help should not require mongod (#894)
+
+version 1.7.1
+~~~~~~~~~~~~~
+ * mlaunch: Bump PyMongo requirement to 4.0+ (#884)
+ * mlaunch: Fix TLS issues (#885)
+ * mlaunch: Print rs initialization announcement prior to init (#868)
+ * mlaunch: Exit with unsuccessful status if replica set can't be
+   initiated after retries (#659)
+ * mlaunch: Fix version detection using configured mongod (#866)
+ * mlaunch: Sharded Cluster creation fails (#849)
+ * mlaunch: Use default SASL/SCRAM mechanisms when creating users (#880)
+ * mlaunch: Remove support for legacy SCCC config servers (#888)
+ * mlaunch: Improve diagnostics in mlaunch (#869)
+ * mlaunch: Output the log path when mongod/mongos launch (#877)
+ * mlaunch: Update default mongodb version to "0.0.0" (#878)
+ * mlaunch: Do not pass invalid option --auth to mongos (#870)
+ * mlaunch: docs incorrectly suggest --config can be used
+   for config file (#872)
+ * mloginfo: Improve --clients with more metadata info (#850)
+ * mloginfo: Cannot extract metadata from some log lines (#871)
+ * Fix dateutil dependency bug (#864)
+ * mtools[mlaunch] does not install with pymongo 4 (#856)
+ * Update dependencies and set upper version constraints (#889)
+
+Thanks to @stennie, @p-mongo, @autarch, @akung0324, @matthewdale,
+and @ShaneHarvey for contributions to this release.
+
+version 1.7.0
+~~~~~~~~~~~~~
+ * Update for PyMongo 4 and add GitHub Actions (#845)
+ * Replace Nose with an actively maintained unit testing library (#842)
+ * Remove usage of "six" library (#786)
+ * Add Python 3.9 compatibility (#813)
+ * Add Python 3.10 compatibility (#841)
+ * Python 3.6 End-of-Life (#840)
+ * Replace OG Python string formatting with f-strings (#787)
+ * mlaunch: Cache the server's help and version output (#817)
+ * mlaunch: Fix --auth does not quote --keyFile parameter (#830)
+ * mlaunch: Add `mlaunch list --json` (#832)
+ * mlaunch: Add TLS aliases for SSL options (#784)
+ * mlaunch: Handle missing MongoDB binaries more gracefully (#846)
+ * mloginfo: Incorrectly shows multiple versions (#815)
+ * mloginfo: Reports host name as unknown for 3.6 logs (#819)
+ * mlogvis: Deprecate mlogvis (#776)
+ * mplotqueries: --overlay example not working (#818)
+
+Thanks to @stennie, @blink1073, @ShaneHarvey, @joedougherty, @ajdavis,
+@virajut, @niccottrell, and @podollb for contributions to this release.
+
 version 1.6.4
 ~~~~~~~~~~~~~
  * mlaunch: Fix psutil 5.7.0 issue on Windows 10 (#810)

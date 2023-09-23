@@ -7,6 +7,8 @@ mplotqueries
 **mplotqueries** is a tool to visualize operations in MongoDB log files. It has
 several different plot types and can group information in various ways.
 
+NOTE: logv2 format (MongoDB 4.4+) is not supported yet.
+
 Usage
 ~~~~~
 
@@ -17,7 +19,6 @@ Usage
                 [--logscale]
                 [--type {nscanned/n,rsstate,connchurn,durline,histogram,range,scatter,event} ]
                 [--overlay [ {add,list,reset} ]]
-                [--storagestats]
                 [additional plot type parameters]
                 [--dns]
                 [--checkpoints]
@@ -107,13 +108,6 @@ OpLog
    operations (points) plotted on the graph. The oplog will produce a scatter
    plot with respect to duration(milliseconds) and the date.
 
-Storage Statistics
-------------------
-``--storagestats``
-   The read storage statistics can be plotted on the graph with the use of
-   ``--storagestats`` flag. The number of bytes read at particular time is
-   mapped onto the graph.
-
 Groupings
 ~~~~~~~~~
 
@@ -137,7 +131,6 @@ not support all groups):
 *  ``filename`` (default for multiple files)
 *  ``operation`` (queries, inserts, updates, ...)
 *  ``thread``
-*  ``log2code``  (not supported by every plot type)
 *  ``pattern`` (query pattern, e.g. ``{foo: 1, bar: 1}``, no sub-documents)
 *  custom grouping with regular expressions (see `Python's regex syntax
    <http://docs.python.org/2/library/re.html#regular-expression-syntax>`__)
@@ -189,19 +182,6 @@ Group Limits
    is useful if the number of groups is very large, as repetitions in color
    (there are only 14 distinct colors) could otherwise make it hard to
    distinguish all the groups for some plot types.
-
-   For example:
-
-   .. code-block:: bash
-
-      mplotqueries mongod.log --type range --group log2code --group-limit 10
-
-   This command creates a range plot, grouped on ``log2code``, but only
-   displays the 10 most frequently occurring log messages as separate groups.
-   All others are plotted as one additional group ``others``.
-
-   .. figure:: images/mplotqueries_group_limit.png
-      :alt: Example plot: group limits
 
 .. _plot-types:
 
@@ -331,7 +311,7 @@ Histogram plots use colors to display different groups. Each group gets its own
 bar, the bars are stacked on top of each other to also give an indication of
 the total number of matched lines per bucket. The supported groupings for
 histogram plots are: ``namespace``, ``operation``, ``thread``, ``filename``
-(for multiple files), ``log2code`` and regular expressions.
+(for multiple files), and regular expressions.
 
 
 Additional Parameters
@@ -377,8 +357,8 @@ Available Groupings
 
 Range plots use colors to display different groups. Each group gets its own
 horizontal bar(s). The supported groupings for range plots are: ``namespace``,
-``operation``, ``thread``, ``filename`` (for multiple files), ``log2code`` and
-regular expressions.
+``operation``, ``thread``, ``filename`` (for multiple files), and regular
+expressions.
 
 For example:
 
